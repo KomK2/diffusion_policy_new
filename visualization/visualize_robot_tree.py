@@ -14,7 +14,7 @@ dataset_dir = VIZ_DIR
 z = zarr.open(f'/home/bmv/diffusion_policy_new/data/{dataset_dir}/replay_buffer.zarr', mode='r')
 
 poses = z['data/action'][:]
-qpos = z['data/robot_joint'][:]
+qpos = z['data/replica_joint'][:]
 ep_len = z['meta/episode_ends'][:]
 ts = z['data/timestamp'][:]
 

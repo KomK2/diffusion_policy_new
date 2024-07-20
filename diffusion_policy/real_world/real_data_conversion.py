@@ -1,8 +1,10 @@
 from typing import Sequence, Tuple, Dict, Optional, Union
 import os
+import matplotlib.pyplot as plt
 import pathlib
 import numpy as np
 import av
+import cv2
 import zarr
 import numcodecs
 import multiprocessing
@@ -17,6 +19,35 @@ from diffusion_policy.codecs.imagecodecs_numcodecs import (
 )
 register_codecs()
 
+def crop_image(frame, camera_idx):
+    black_img = np.zeros((480, 640, 3), dtype=np.uint8)
+    if camera_idx == 0:  # Top camera
+        cropped_part = frame[50:400, 75:500]
+        cropped_image = cv2.resize(cropped_part, (640, 480))
+        # black_img[120:350, 280:460] = cropped_part
+        # cropped_image = black_img.copy()
+        return cropped_image
+    
+    if camera_idx == 1:  # Low camera
+        cropped_part = frame[69:400, 130:500]
+        cropped_image = cv2.resize(cropped_part, (640, 480))
+        # black_img[160:360, 160:420] = cropped_part
+        # cropped_image = black_img.copy()
+        return cropped_image
+    
+    return frame
+    
+#     if camera_idx == 2:                                                 # Wrist camera
+#         # black_img[:, :] = frame[:, 30:380]
+#         cropped_image = frame.copy()
+#         # cv2.imwrite(f"image_{camera_idx}.jpg", cropped_image)
+#         return cropped_image
+
+#     # if camera_idx == 3:
+#     #     black_img[30:250, 150:500] = frame[30:250, 150:500]
+#     #     cropped_image = black_img.copy()
+#     #     # cv2.imwrite(f"image_{camera_idx}.jpg", cropped_image)
+#     #     return cropped_image
 
 def real_data_to_replay_buffer(
         dataset_path: str, 
@@ -29,7 +60,8 @@ def real_data_to_replay_buffer(
         n_decoding_threads: int=multiprocessing.cpu_count(),
         n_encoding_threads: int=multiprocessing.cpu_count(),
         max_inflight_tasks: int=multiprocessing.cpu_count()*5,
-        verify_read: bool=True
+        verify_read: bool=True,
+        save_images_dir : str = "./cropped_images/"
         ) -> ReplayBuffer:
     """
     It is recommended to use before calling this function
@@ -62,7 +94,7 @@ def real_data_to_replay_buffer(
     assert in_video_dir.is_dir()
     
     in_replay_buffer = ReplayBuffer.create_from_path(str(in_zarr_path.absolute()), mode='r')
-
+ 
     # save lowdim data to single chunk
     chunks_map = dict()
     compressor_map = dict()
@@ -78,12 +110,12 @@ def real_data_to_replay_buffer(
         chunks=chunks_map,
         compressors=compressor_map
         )
-    
+    os.makedirs(save_images_dir, exist_ok=True)
     # worker function
     def put_img(zarr_arr, zarr_idx, img):
         try:
             zarr_arr[zarr_idx] = img
-            # make sure we can successfully decode
+            # make sure we can successfully drobot_joint_velecode
             if verify_read:
                 _ = zarr_arr[zarr_idx]
             return True
@@ -161,9 +193,9 @@ def real_data_to_replay_buffer(
                             dtype=np.uint8
                         )
                     arr = out_replay_buffer[arr_name]
-
                     image_tf = get_image_transform(
                         input_res=in_img_res, output_res=out_img_res, bgr_to_rgb=False)
+                    # counter= 1
                     for step_idx, frame in enumerate(read_video(
                             video_path=str(video_path),
                             dt=dt,
@@ -178,10 +210,17 @@ def real_data_to_replay_buffer(
                             for f in completed:
                                 if not f.result():
                                     raise RuntimeError('Failed to encode image!')
+                                
                             pbar.update(len(completed))
-                        
+                        cropped_image = crop_image(frame, camera_idx)
+                        # cropped_image_filename = os.path.join(save_images_dir, f"episode_{episode_idx}_frame_{step_idx}_camera_{camera_idx}.jpg")
+                        # cv2.imwrite(cropped_image_filename, cropped_image)
+
+                        """
+                        Add segmentation/ cropping logic here with frame as input
+                        """
                         global_idx = episode_start + step_idx
-                        futures.add(executor.submit(put_img, arr, global_idx, frame))
+                        futures.add(executor.submit(put_img, arr, global_idx, cropped_image))
 
                         if step_idx == (episode_length - 1):
                             break

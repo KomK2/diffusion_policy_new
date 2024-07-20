@@ -265,11 +265,11 @@ class RTDEInterpolationController(mp.Process):
                 pose_command = pose_interp(t_now)
                 vel = 0.5
                 acc = 0.5
-                assert rtde_c.servoL(pose_command, 
-                    vel, acc, # dummy, not used by ur5
-                    dt, 
-                    self.lookahead_time, 
-                    self.gain)
+                # assert rtde_c.servoL(pose_command, 
+                #     vel, acc, # dummy, not used by ur5
+                #     dt, 
+                #     self.lookahead_time, 
+                #     self.gain)
                 
                 # update robot state
                 state = dict()

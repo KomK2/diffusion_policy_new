@@ -5,7 +5,7 @@ from viz_constants import VIZ_DIR
 
 dataset_dir = VIZ_DIR
 # Load the Zarr dataset
-z = zarr.open(f'/home/bmv/diffusion_policy_mod_apr24/data/{dataset_dir}/replay_buffer.zarr', mode='r')
+z = zarr.open(f'/home/bmv/diffusion_policy_new/data/{dataset_dir}/replay_buffer.zarr', mode='r')
 
 ep_len = z['meta/episode_ends'][:]
 ft = z['data/ft_data'][:]

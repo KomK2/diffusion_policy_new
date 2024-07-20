@@ -22,7 +22,8 @@ import click
 import cv2
 import numpy as np
 import scipy.spatial.transform as st
-from diffusion_policy.real_world.real_env import RealEnv
+# from diffusion_policy.real_world.real_env import RealEnv
+from diffusion_policy.real_world.real_env_with_ft import RealEnv
 from diffusion_policy.real_world.spacemouse_shared_memory import Spacemouse
 from diffusion_policy.common.precise_sleep import precise_wait
 from diffusion_policy.real_world.keystroke_counter import (
@@ -80,7 +81,9 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
             video_crf=21,
             shm_manager=shm_manager,
             camera_serial_numbers=["cam_high","cam_low", "cam_wrist"],
-            video_capture_fps=30
+            video_capture_fps=60,
+            ft_master_service_name = None,
+            ft_follower_service_name = None,
         ) as env:
             cv2.setNumThreads(1)
             # connect to replica
@@ -118,6 +121,7 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
                         stop = True
                     elif key_stroke == KeyCode(char="c"):
                         # Start recording
+                        env.ft_sensor.calibrate_sensor()
                         env.start_episode(
                             t_start
                             + (iter_idx + 2) * dt

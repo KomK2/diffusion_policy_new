@@ -1,1 +1,1 @@
-VIZ_DIR = "rice_scoop_teleop_org_repo"
+VIZ_DIR = "ft_proprio_50hz"

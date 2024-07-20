@@ -33,8 +33,8 @@ import pathlib
 import skvideo.io
 from omegaconf import OmegaConf
 import scipy.spatial.transform as st
-# from diffusion_policy.real_world.real_env import RealEnv
-from diffusion_policy.real_world.real_env_with_ft import RealEnv
+from diffusion_policy.real_world.real_env import RealEnv
+# from diffusion_policy.real_world.real_env_with_ft import RealEnv
 from diffusion_policy.real_world.spacemouse_shared_memory import Spacemouse
 from diffusion_policy.common.precise_sleep import precise_wait
 from diffusion_policy.real_world.real_inference_util import (
@@ -136,7 +136,7 @@ def main(input, output, robot_ip, match_dataset, match_episode,
 
                 # set inference params
                 policy.num_inference_steps = 15 # DDIM inference iterations
-                policy.n_action_steps = 8
+                policy.n_action_steps = 4
 
             # Should be the same as demo
             # realsense exposure
@@ -218,7 +218,7 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                     precise_wait(t_sample)
                     # get teleop command
                     sm_state = sm.get_motion_state_transformed()
-                    # print(sm_state)
+                    #print("space mouse state:", sm_state)
                     dpos = sm_state[:3] * (env.max_pos_speed / frequency)
                     drot_xyz = sm_state[3:] * (env.max_rot_speed / frequency)
   
@@ -248,12 +248,17 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                 # ========== policy control loop ==============
                 try:
                     # start episode
-                    env.ft_sensor.calibrate_sensor()
+                    # env.ft_sensor.calibrate_sensor()
                     policy.reset()
                     start_delay = 1.0
                     eval_t_start = time.time() + start_delay
                     t_start = time.monotonic() + start_delay
                     env.start_episode(eval_t_start)
+                    max_steps = max_duration * frequency
+                    # Initialize these variables before the loops
+                    history_length = 1  # Number of past sets of actions to consider for aggregation
+                    all_time_actions = torch.zeros((history_length + 1, 4, 6))  # Shape: (history length, 4 actions, 6 eef positions)
+                    current_time_step = 0  # Initialize the time step
                     # wait for 1/30 sec to get the closest frame actually
                     # reduces overall latency
                     frame_latency = 1/30
@@ -262,15 +267,28 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                     iter_idx = 0
                     term_area_start_timestamp = float('inf')
                     perv_target_pose = None
+                    print(f"steps per inference are: {steps_per_inference}")
                     while True:
-                        # calculate timing
+                        # calculate timing2384
                         t_cycle_end = t_start + (iter_idx + steps_per_inference) * dt
-
                         # get obs
-                        # print('get_obs')
-                        env.ft_sensor.calibrate_sensor()
+                        #print('get_obs')
+                        # env.ft_sensor.calibrate_sensor()
                         obs = env.get_obs()
+                        # for k,v in obs.items():
+                        #     if isinstance(v, np.ndarray):
+                        #         print(f"{k}: {v.shape}")
+                        #     else:
+                        #         print(f"{k}: {type(v)}")
                         obs_timestamps = obs['timestamp']
+                        #num_observations = len(obs_timestamps)
+                        #print(f"Number of observations collected: {num_observations}")
+                        #print(f"Values of time when the observatio ns are collected: {obs_timestamps}")
+                        print(f'Iteration index: {iter_idx}')
+                        print(f'Time cycle end: {t_cycle_end}')
+
+
+                        
                         print(f'Obs latency {time.time() - obs_timestamps[-1]}')
 
                         # run inference
@@ -282,14 +300,42 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                                 lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
                             result = policy.predict_action(obs_dict)
                             # this action starts from the first obs step
-                            action = result['action'][0].detach().to('cpu').numpy()
+                            actions = result['action'][0].detach().to('cpu').numpy()
+                            # print("Action Tensor:", result['action'][0])
+                            # print("Action Numpy Array:", actions)
+
                             print('Inference latency:', time.time() - s)
+
+
+
+                        all_time_actions[current_time_step % (history_length + 1)] = torch.tensor(actions)
+        
+                        # Initialize array to hold aggregated actions
+                        aggregated_actions = np.zeros_like(actions)
+
+                        # Aggregate each of the 4 actions separately
+                        for i in range(4):
+                            # Gather actions from the current and previous iterations for action i
+                            recent_actions = all_time_actions[:min(current_time_step + 1, history_length + 1), i]
+                            recent_actions = recent_actions.view(-1, 6)  # Flatten to shape (num_actions, 6)
+                            
+                            # Exponential weighting
+                            k = 0.01  # Adjust the decay rate as necessary
+                            exp_weights = np.exp(-k * np.arange(len(recent_actions)))
+                            exp_weights = exp_weights / exp_weights.sum()
+                            exp_weights = torch.from_numpy(exp_weights).unsqueeze(dim=1)
+                            
+                            # Aggregate actions
+                            aggregated_action = (recent_actions * exp_weights).sum(dim=0).numpy()  # Shape (1, 6)
+                            aggregated_actions[i] = aggregated_action
                         
+                        # Increment the time step
+                        current_time_step += 1
                         # convert policy action to env actions
                         if delta_action:
                             assert len(action) == 1
                             if perv_target_pose is None:
-                                perv_target_pose = obs['robot_eef_pose'][-1]
+                                perv_target_pose = obs['replica_eef_pose'][-1]
                             this_target_pose = perv_target_pose.copy()
                             this_target_pose[[0,1]] += action[-1]
                             perv_target_pose = this_target_pose
@@ -297,15 +343,22 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                         else:
                             this_target_poses = np.zeros((len(action), len(target_pose)), dtype=np.float64)
                             this_target_poses[:] = target_pose
-                            this_target_poses[:,[0,1,2,3,4,5]] = action
+                            this_target_poses[:,[0,1,2,3,4,5]] = aggregated_actions
 
+                            #print("Initial this_target_poses:", this_target_poses)
+                            #print("Initial Shape of updated this_target_poses:", this_target_poses.shape)
                         # deal with timing
                         # the same step actions are always the target for
                         action_timestamps = (np.arange(len(action), dtype=np.float64) + action_offset
                             ) * dt + obs_timestamps[-1]
+                        #print(f"Action timestamps: {action_timestamps}")
                         action_exec_latency = 0.01
-                        curr_time = time.time()
+                        curr_time = time.monotonic()
+
+                        #print(f"Current time: {curr_time}")
                         is_new = action_timestamps > (curr_time + action_exec_latency)
+                        #print(f"Current time: {curr_time}")
+                        #print(f"Is new (valid action timestamps): {is_new}")
                         if np.sum(is_new) == 0:
                             # exceeded time budget, still do something
                             this_target_poses = this_target_poses[[-1]]
@@ -317,6 +370,13 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                         else:
                             this_target_poses = this_target_poses[is_new]
                             action_timestamps = action_timestamps[is_new]
+                        # Print this_target_poses and action_timestamps
+                        #print(f"final target poses: {this_target_poses}")
+                        #print(f"Filtered action timestamps: {action_timestamps}")
+                        #print(f"Length of action: {len(action)}")
+                        print("Shape of final this_target_poses:", this_target_poses.shape)
+                        action_timestamp_differences = np.diff(action_timestamps)
+                        #print(f'Action timestamp differences: {action_timestamp_differences}')
 
                         # clip actions
                         # this_target_poses[:,:2] = np.clip(
@@ -383,8 +443,11 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                             break
 
                         # wait for execution
-                        precise_wait(t_cycle_end - frame_latency)
+                        precise_wait(0.2)
                         iter_idx += steps_per_inference
+
+
+                        print(f'Number of loop executions: {iter_idx}')
 
                 except KeyboardInterrupt:
                     print("Interrupted!")

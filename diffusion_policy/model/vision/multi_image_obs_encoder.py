@@ -7,6 +7,41 @@ from diffusion_policy.model.vision.crop_randomizer import CropRandomizer
 from diffusion_policy.model.common.module_attr_mixin import ModuleAttrMixin
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 
+class MLP(nn.Module):
+    def __init__(self, units, input_size):
+        super(MLP, self).__init__()
+        layers = []
+        for output_size in units:
+            # meaning of "nn.Linear(input_size, output_size)""
+            # output = input @ weight.t() + bias
+            layers.append(nn.Linear(input_size, output_size))
+            # TODO: is ELU the best?
+            layers.append(nn.ELU())
+            input_size = output_size
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.mlp(x)
+
+class StateEncoder(nn.Module):
+    def __init__(
+        self,
+        input_size,
+        output_size,
+        hidden_size=256,
+        dropout=0.0,
+        binarize_touch=False,
+    ):
+        super(StateEncoder, self).__init__()
+        self.linear = MLP([hidden_size, output_size], input_size)
+        self.dropout = nn.Dropout(dropout)
+        self.binarize_touch = binarize_touch
+
+    def forward(self, x):
+        if self.binarize_touch:
+            x = (x > 1000.0).float()
+        return self.dropout(self.linear(x))
+
 
 class MultiImageObsEncoder(ModuleAttrMixin):
     def __init__(self,
@@ -124,10 +159,21 @@ class MultiImageObsEncoder(ModuleAttrMixin):
         self.low_dim_keys = low_dim_keys
         self.key_shape_map = key_shape_map
 
+        self.state_encoders = nn.ModuleDict()
+        for key, attr in obs_shape_meta.items():
+            shape = tuple(attr['shape'])
+            type = attr.get('type', 'low_dim')
+            if type == 'low_dim':
+                input_size = shape[0]  # Assuming the shape is (6,)
+                output_size = 128 
+
+                self.state_encoders[key] = StateEncoder(input_size= input_size, output_size = output_size)
+
     def forward(self, obs_dict):
         batch_size = None
         features = list()
         # process rgb input
+        # share_rgb_model is false in the setup so else block will be executed
         if self.share_rgb_model:
             # pass all rgb obs to rgb model
             imgs = list()
@@ -171,8 +217,16 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                 batch_size = data.shape[0]
             else:
                 assert batch_size == data.shape[0]
-            assert data.shape[1:] == self.key_shape_map[key]
-            features.append(data)
+            # assert data.shape[1:] == self.key_shape_map[key]
+            try:
+                assert data.shape[1:] == self.key_shape_map[key]
+            except AssertionError as e:
+                raise AssertionError(f"Shape mismatch for key '{key}'. Expected shape: {self.key_shape_map[key]}, Actual shape: {data.shape[1:]}") from e
+
+            # features.append(data)
+            encoded_data = self.state_encoders[key](data)
+            features.append(encoded_data)
+
         
         # concatenate all features
         result = torch.cat(features, dim=-1)

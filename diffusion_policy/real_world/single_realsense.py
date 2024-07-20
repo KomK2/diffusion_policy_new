@@ -33,14 +33,14 @@ class SingleRealsense(mp.Process):
             shm_manager: SharedMemoryManager,
             serial_number,
             resolution=(1280,720),
-            capture_fps=30,
+            capture_fps=60,
             put_fps=None,
             put_downsample=True,
             record_fps=None,
             enable_color=True,
             enable_depth=False,
             enable_infrared=False,
-            get_max_k=30,
+            get_max_k=60,
             advanced_mode_config=None,
             transform: Optional[Callable[[Dict], Dict]] = None,
             vis_transform: Optional[Callable[[Dict], Dict]] = None,
@@ -301,7 +301,7 @@ class SingleRealsense(mp.Process):
                 # Initialize the RealSense pipeline
                 config = rs.config()
                 config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, self.capture_fps)
-                config.enable_device(WRIST_CAM_ID)
+                config.enable_device(WRIST_CAM_MASTER_ID)
                 pipeline = rs.pipeline()
                 pipeline.start(config)
                 sensor = pipeline.get_active_profile().get_device().query_sensors()[0]
@@ -339,7 +339,7 @@ class SingleRealsense(mp.Process):
             """ 
             # Logitech camera setup
             if self.serial_number == 'cam_high':
-                cam_path = os.path.realpath("/dev/CAM_HIGH")
+                cam_path = os.path.realpath("/dev/CAM_HIGH_MASTER")
                 cam_idx = int(cam_path.split("/dev/video")[-1])
                 cap = cv2.VideoCapture(cam_idx)
                 cap.set(cv2.CAP_PROP_EXPOSURE, 0)
@@ -423,8 +423,11 @@ class SingleRealsense(mp.Process):
                         Below is cropping logic when performing domain gap
                         comment/ uncomment these lines as needed
                         """
-                        # black_img[y1:y2, x1:x2] = frameset[y1:y2, x1:x2]
-                        # frameset = black_img.copy()
+                        # cropped_part = frameset[100:,:]
+                        # # frameset = black_img.copy()
+                        # frameset = cv2.resize(cropped_part, (640,480))
+                        # frameset = cropped_part.copy()
+
                         """
                         Cropping logic ends here
                         """
@@ -439,9 +442,10 @@ class SingleRealsense(mp.Process):
                     Below is cropping logic when performing domain gap
                     comment/ uncomment these lines as needed
                     """
-                    # black_img[y1:y2, x1:x2] = frameset[y1:y2, x1:x2]
-                    # frameset = black_img.copy()
-
+                    # cropped_part = frameset[60:, 100:]
+                    #     # frameset = black_img.copy()
+                    # frameset = cv2.resize(cropped_part, (640,480))
+                    # frameset = cropped_part.copy()
                     """
                     Cropping logic ends here
                     """
