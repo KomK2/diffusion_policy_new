@@ -3,6 +3,7 @@ import copy
 import torch
 import torch.nn as nn
 import torchvision
+from diffusion_policy.model.ft_transformer import ForceTorqueEncoder
 from diffusion_policy.model.vision.crop_randomizer import CropRandomizer
 from diffusion_policy.model.common.module_attr_mixin import ModuleAttrMixin
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
@@ -72,40 +73,40 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                 # configure resize
                 input_shape = shape
                 this_resizer = nn.Identity()
-                if resize_shape is not None:
-                    if isinstance(resize_shape, dict):
-                        h, w = resize_shape[key]
-                    else:
-                        h, w = resize_shape
-                    this_resizer = torchvision.transforms.Resize(
-                        size=(h,w)
-                    )
-                    input_shape = (shape[0],h,w)
+                # if resize_shape is not None:
+                #     if isinstance(resize_shape, dict):
+                #         h, w = resize_shape[key]
+                #     else:
+                #         h, w = resize_shape
+                #     this_resizer = torchvision.transforms.Resize(
+                #         size=(h,w)
+                #     )
+                #     input_shape = (shape[0],h,w)
 
                 # configure randomizer
                 this_randomizer = nn.Identity()
-                if crop_shape is not None:
-                    if isinstance(crop_shape, dict):
-                        h, w = crop_shape[key]
-                    else:
-                        h, w = crop_shape
-                    if random_crop:
-                        this_randomizer = CropRandomizer(
-                            input_shape=input_shape,
-                            crop_height=h,
-                            crop_width=w,
-                            num_crops=1,
-                            pos_enc=False
-                        )
-                    else:
-                        this_normalizer = torchvision.transforms.CenterCrop(
-                            size=(h,w)
-                        )
+                # if crop_shape is not None:
+                #     if isinstance(crop_shape, dict):
+                #         h, w = crop_shape[key]
+                #     else:
+                #         h, w = crop_shape
+                #     if random_crop:
+                #         this_randomizer = CropRandomizer(
+                #             input_shape=input_shape,
+                #             crop_height=h,
+                #             crop_width=w,
+                #             num_crops=1,
+                #             pos_enc=False
+                #         )
+                #     else:
+                #         this_normalizer = torchvision.transforms.CenterCrop(
+                #             size=(h,w)
+                #         )
                 # configure normalizer
                 this_normalizer = nn.Identity()
-                if imagenet_norm:
-                    this_normalizer = torchvision.transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                # if imagenet_norm:
+                #     this_normalizer = torchvision.transforms.Normalize(
+                #         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                 
                 this_transform = nn.Sequential(this_resizer, this_randomizer, this_normalizer)
                 key_transform_map[key] = this_transform
@@ -123,6 +124,8 @@ class MultiImageObsEncoder(ModuleAttrMixin):
         self.rgb_keys = rgb_keys
         self.low_dim_keys = low_dim_keys
         self.key_shape_map = key_shape_map
+
+        self.ft_transformer = ForceTorqueEncoder(input_dim=6)
 
     def forward(self, obs_dict):
         batch_size = None
@@ -167,11 +170,20 @@ class MultiImageObsEncoder(ModuleAttrMixin):
         # process lowdim input
         for key in self.low_dim_keys:
             data = obs_dict[key]
+
             if batch_size is None:
                 batch_size = data.shape[0]
             else:
                 assert batch_size == data.shape[0]
             assert data.shape[1:] == self.key_shape_map[key]
+
+            if key =="ft_data":
+                ft_data = data.unsqueeze(1)
+                # ft_data = ft_data.transpose(0, 1)  # (B, N, D) -> (N, B, D)
+                encoded_data = self.ft_transformer(ft_data)
+                encoded_data = encoded_data.transpose(0, 1).squeeze(0) # (N, B, D) -> (B, N, D)
+                data = encoded_data
+
             features.append(data)
         
         # concatenate all features
