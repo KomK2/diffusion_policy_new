@@ -72,40 +72,40 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                 # configure resize
                 input_shape = shape
                 this_resizer = nn.Identity()
-                if resize_shape is not None:
-                    if isinstance(resize_shape, dict):
-                        h, w = resize_shape[key]
-                    else:
-                        h, w = resize_shape
-                    this_resizer = torchvision.transforms.Resize(
-                        size=(h,w)
-                    )
-                    input_shape = (shape[0],h,w)
+                # if resize_shape is not None:
+                #     if isinstance(resize_shape, dict):
+                #         h, w = resize_shape[key]
+                #     else:
+                #         h, w = resize_shape
+                #     this_resizer = torchvision.transforms.Resize(
+                #         size=(h,w)
+                #     )
+                #     input_shape = (shape[0],h,w)
 
                 # configure randomizer
                 this_randomizer = nn.Identity()
-                if crop_shape is not None:
-                    if isinstance(crop_shape, dict):
-                        h, w = crop_shape[key]
-                    else:
-                        h, w = crop_shape
-                    if random_crop:
-                        this_randomizer = CropRandomizer(
-                            input_shape=input_shape,
-                            crop_height=h,
-                            crop_width=w,
-                            num_crops=1,
-                            pos_enc=False
-                        )
-                    else:
-                        this_normalizer = torchvision.transforms.CenterCrop(
-                            size=(h,w)
-                        )
+                # if crop_shape is not None:
+                #     if isinstance(crop_shape, dict):
+                #         h, w = crop_shape[key]
+                #     else:
+                #         h, w = crop_shape
+                #     if random_crop:
+                #         this_randomizer = CropRandomizer(
+                #             input_shape=input_shape,
+                #             crop_height=h,
+                #             crop_width=w,
+                #             num_crops=1,
+                #             pos_enc=False
+                #         )
+                #     else:
+                #         this_normalizer = torchvision.transforms.CenterCrop(
+                #             size=(h,w)
+                #         )
                 # configure normalizer
                 this_normalizer = nn.Identity()
-                if imagenet_norm:
-                    this_normalizer = torchvision.transforms.Normalize(
-                        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                # if imagenet_norm:
+                #     this_normalizer = torchvision.transforms.Normalize(
+                #         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                 
                 this_transform = nn.Sequential(this_resizer, this_randomizer, this_normalizer)
                 key_transform_map[key] = this_transform
