@@ -21,7 +21,7 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                  imagenet_norm: bool=False):
         super().__init__()
 
-        self.num = 0  
+        self.num = 0  # Counter to control when to visualize
         self.intermediate_features = {}
 
         rgb_keys = list()
@@ -102,14 +102,25 @@ class MultiImageObsEncoder(ModuleAttrMixin):
 
         self.shape_meta = shape_meta
         self.key_model_map = key_model_map
-        model_without_fc = nn.Sequential(*list(key_model_map["camera_1"].children())[:-3])
+        model_without_fc = nn.Sequential(*list(key_model_map["camera_1"].children())[:-5])
 
+# Apply the image to this modified model
+        # intermediate_features = model_without_fc(img)
         self.model_without_fc = model_without_fc
         self.key_transform_map = key_transform_map
         self.share_rgb_model = share_rgb_model
         self.rgb_keys = rgb_keys
         self.low_dim_keys = low_dim_keys
         self.key_shape_map = key_shape_map
+
+    # def _register_hooks(self, model):
+    #     """Register hooks to capture intermediate features."""
+    #     def hook(module, input, output, name):
+    #         self.intermediate_features[name] = output
+
+    #     for name, layer in model.named_modules():
+    #         if isinstance(layer, (nn.Conv2d, nn.ReLU, nn.MaxPool2d, nn.AdaptiveAvgPool2d)):
+    #             layer.register_forward_hook(lambda module, input, output, layer_name=name: hook(module, input, output, layer_name))
 
     def forward(self, obs_dict):
         batch_size = None
@@ -148,17 +159,13 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                 assert img.shape[1:] == self.key_shape_map[key]
                 img = self.key_transform_map[key](img)
                 feature = self.key_model_map[key](img)
-
-                model_copy = copy.deepcopy(self.key_model_map[key])
-                feature_without_fc = nn.Sequential(*list(model_copy.children())[:-1])(img)
+                feature_without_fc = self.model_without_fc(img)
                 
                 features.append(feature)
 
                 if self.num == 1:
                     feature_map[key] = feature
                     print(f"Visualizing features from {key} with shape {feature_without_fc.shape}")
-                    import pdb; pdb.set_trace()
-
 
                     self.visualize_feature_map(feature_without_fc)
                 self.num += 1
