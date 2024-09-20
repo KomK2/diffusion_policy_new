@@ -61,6 +61,7 @@ from aloha_scripts.constants import *
 def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency):
     # TODO: look into rtde_interpolation_controller.py and pose_trajectory_interpolator.py
     dt = 1 / frequency
+
     with SharedMemoryManager() as shm_manager:
         with KeystrokeCounter() as key_counter, Spacemouse(
             shm_manager=shm_manager
@@ -78,13 +79,18 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
             # video recording quality, lower is better (but slower).
             video_crf=21,
             shm_manager=shm_manager,
-            camera_serial_numbers=["cam_high_master", "cam_low","cam_wrist_master","cam_front_master"],
-            video_capture_fps=30,
+            camera_serial_numbers=["cam_high","cam_low","cam_wrist","cam_front"],
+            video_capture_fps=30
         ) as env:
             cv2.setNumThreads(1)
             # connect to replica
             replica = Master(MASTER_IP)
             replica.connect()
+
+            # realsense exposure
+            # env.realsense.set_exposure(exposure=120, gain=0)
+            # # realsense white balance
+            # env.realsense.set_white_balance(white_balance=5900)
 
             time.sleep(1.0)
             print("Ready!")
@@ -156,8 +162,7 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
 
                 precise_wait(t_sample)
 
-
-                # use replica to get TCP actions
+                # # use replica to get TCP actions
                 replica_joint = replica.getJointAngles()
                 replica_joint[-1] -= 0.587999344
                 target_pose = replica.getTCPPosition(replica_joint)

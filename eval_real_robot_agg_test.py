@@ -32,9 +32,10 @@ import hydra
 import pathlib
 import skvideo.io
 from omegaconf import OmegaConf
+from collections import defaultdict
 import scipy.spatial.transform as st
 from diffusion_policy.real_world.real_env import RealEnv
-# from diffusion_policy.real_world.real_env_with_ft_interp import RealEnv
+# from diffusion_policy.real_world.real_env_with_ft import RealEnv
 from diffusion_policy.real_world.spacemouse_shared_memory import Spacemouse
 from diffusion_policy.common.precise_sleep import precise_wait
 from diffusion_policy.real_world.real_inference_util import (
@@ -54,9 +55,9 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 @click.option('--robot_ip', '-ri', required=True, help="UR5's IP address e.g. 192.168.0.204")
 @click.option('--match_dataset', '-m', default=None, help='Dataset used to overlay and adjust initial condition')
 @click.option('--match_episode', '-me', default=None, type=int, help='Match specific episode from the match dataset')
-@click.option('--vis_camera_idx', default=0, type=int, help="Which RealSense camera to visualize.")
+@click.option('--vis_camera_idx', default=1, type=int, help="Which RealSense camera to visualize.")
 @click.option('--init_joints', '-j', is_flag=True, default=False, help="Whether to initialize robot joint configuration in the beginning.")
-@click.option('--steps_per_inference', '-si', default=4, type=int, help="Action horizon for inference.")
+@click.option('--steps_per_inference', '-si', default=2, type=int, help="Action horizon for inference.")
 @click.option('--max_duration', '-md', default=100, help='Max duration for each epoch in seconds.')
 @click.option('--frequency', '-f', default=10, type=float, help="Control frequency in Hz.")
 @click.option('--command_latency', '-cl', default=0.01, type=float, help="Latency between receiving SapceMouse command to executing on Robot in Sec.")
@@ -83,6 +84,13 @@ def main(input, output, robot_ip, match_dataset, match_episode,
 
     # setup experiment
     dt = 1/frequency
+
+    # obs_res = get_real_obs_resolution(cfg.task.shape_meta)
+    # n_obs_steps = cfg.n_obs_steps
+    # print("n_obs_steps: ", n_obs_steps)
+    # print(len():",len())
+    # print("action_offset:", action_offset)
+
     with SharedMemoryManager() as shm_manager:
         with Spacemouse(shm_manager=shm_manager) as sm, RealEnv(
             output_dir=output, 
@@ -101,7 +109,7 @@ def main(input, output, robot_ip, match_dataset, match_episode,
             # video recording quality, lower is better (but slower).
             video_crf=21,
             shm_manager=shm_manager,
-            camera_serial_numbers= ["cam_high","cam_low","cam_wrist","cam_front"]) as env:
+            camera_serial_numbers= ["cam_high", "cam_low", "cam_wrist","cam_front"]) as env:
             cv2.setNumThreads(1)
 
             # load checkpoint
@@ -131,6 +139,12 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                 policy.num_inference_steps = 15 # DDIM inference iterations
                 policy.n_action_steps = 8
 
+            # Should be the same as demo
+            # realsense exposure
+            # env.realsense.set_exposure(exposure=150, gain=0)
+            # # realsense white balance
+            # env.realsense.set_white_balance(white_balance=3700)
+
             print("Waiting for realsense")
             time.sleep(1.0)
 
@@ -148,8 +162,7 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                 del result
 
             print('Ready!')
-
-            prev_pose = None
+            action_buffer = defaultdict(list)
             while True:
                 # ========= human control loop ==========
                 print("Human in control!")
@@ -207,7 +220,7 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                     precise_wait(t_sample)
                     # get teleop command
                     sm_state = sm.get_motion_state_transformed()
-                    # print(sm_state)
+                    #print("space mouse state:", sm_state)
                     dpos = sm_state[:3] * (env.max_pos_speed / frequency)
                     drot_xyz = sm_state[3:] * (env.max_rot_speed / frequency)
   
@@ -224,6 +237,8 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                     target_pose[:3] += dpos
                     target_pose[3:] = (drot * st.Rotation.from_rotvec(
                         target_pose[3:])).as_rotvec()
+                    # clip target pose
+                    # target_pose[:2] = np.clip(target_pose[:2], [0.25, -0.45], [0.77, 0.40])  ## commented this to make teleop working 
 
                     # execute teleop command
                     env.exec_actions(
@@ -234,63 +249,76 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                 
                 # ========== policy control loop ==============
                 try:
-                    # start episode
+                    # Start the episode
                     policy.reset()
                     start_delay = 1.0
                     eval_t_start = time.time() + start_delay
                     t_start = time.monotonic() + start_delay
                     env.start_episode(eval_t_start)
-                    # wait for 1/30 sec to get the closest frame actually
-                    # reduces overall latency
                     frame_latency = 1/30
                     precise_wait(eval_t_start - frame_latency, time_func=time.time)
                     print("Started!")
                     iter_idx = 0
                     term_area_start_timestamp = float('inf')
                     perv_target_pose = None
+
                     while True:
-                        # calculate timing
+                        # Calculate timing
                         t_cycle_end = t_start + (iter_idx + steps_per_inference) * dt
 
-                        # get obs
-                        # print('get_obs')
-                        obs = env.get_obs()
-                        obs_timestamps = obs['timestamp']
-                        print(f'Obs latency {time.time() - obs_timestamps[-1]}')
+                        actions_buffer = []
 
-                        # run inference
-                        with torch.no_grad():
-                            s = time.time()
-                            obs_dict_np = get_real_obs_dict(
-                                env_obs=obs, shape_meta=cfg.task.shape_meta)
-                            obs_dict = dict_apply(obs_dict_np, 
-                                lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
-                            result = policy.predict_action(obs_dict)
-                            # this action starts from the first obs step
-                            action = result['action'][0].detach().to('cpu').numpy()
-                            print('Inference latency:', time.time() - s)
-                        
-                        # convert policy action to env actions
+                        for _ in range(policy.n_action_steps): 
+                            # Get observations
+                            obs = env.get_obs()
+                            obs_timestamps = obs['timestamp']
+                            print(f'Obs latency {time.time() - obs_timestamps[-1]}')
+
+                            # Run inference
+                            with torch.no_grad():
+                                obs_dict_np = get_real_obs_dict(env_obs=obs, shape_meta=cfg.task.shape_meta)
+                                obs_dict = dict_apply(obs_dict_np, lambda x: torch.from_numpy(x).unsqueeze(0).to(device))
+                                result = policy.predict_action(obs_dict)
+                                actions = result['action'][0].detach().to('cpu').numpy()
+                                actions_buffer.append(actions)  # Store the actions in the buffer
+
+                        # Convert the buffer into a numpy array for aggregation
+                        actions_buffer = np.array(actions_buffer) 
+
+                        # Exponential weighting
+                        k = 0.01  # Decay rate; adjust based on how quickly you want older actions to lose importance
+                        exp_weights = np.exp(-k * np.arange(len(actions_buffer)))
+                        exp_weights = exp_weights / exp_weights.sum()  # Normalize to ensure weights sum to 1
+
+                        aggregated_actions = np.sum(actions_buffer * exp_weights[:, None, None], axis=0)  # Shape: len(), 6)
+
+                        # Now use the aggregated actions
                         if delta_action:
                             assert len(action) == 1
                             if perv_target_pose is None:
-                                perv_target_pose = obs['replica_eef_pose'][-1]
+                                perv_target_pose = obs['robot_eef_pose'][-1]
                             this_target_pose = perv_target_pose.copy()
-                            this_target_pose[[0,1]] += action[-1]
+                            this_target_pose[[0,1]] += aggregated_actions[-1]  # Adjusted from 'actions'
                             perv_target_pose = this_target_pose
                             this_target_poses = np.expand_dims(this_target_pose, axis=0)
                         else:
                             this_target_poses = np.zeros((len(action), len(target_pose)), dtype=np.float64)
                             this_target_poses[:] = target_pose
-                            this_target_poses[:,[0,1,2,3,4,5]] = action
-
+                            this_target_poses[:,[0,1,2,3,4,5]] = aggregated_actions  # Adjusted from 'actions'
+                        print("Initial this_target_poses:", this_target_poses)
+                            #print("Initial Shape of updated this_target_poses:", this_target_poses.shape)
                         # deal with timing
                         # the same step actions are always the target for
                         action_timestamps = (np.arange(len(action), dtype=np.float64) + action_offset
                             ) * dt + obs_timestamps[-1]
+                        #print(f"Action timestamps: {action_timestamps}")
                         action_exec_latency = 0.01
-                        curr_time = time.time()
+                        curr_time = time.monotonic()
+
+                        #print(f"Current time: {curr_time}")
                         is_new = action_timestamps > (curr_time + action_exec_latency)
+                        #print(f"Current time: {curr_time}")
+                        #print(f"Is new (valid action timestamps): {is_new}")
                         if np.sum(is_new) == 0:
                             # exceeded time budget, still do something
                             this_target_poses = this_target_poses[[-1]]
@@ -302,6 +330,12 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                         else:
                             this_target_poses = this_target_poses[is_new]
                             action_timestamps = action_timestamps[is_new]
+                        # Print this_target_poses and action_timestamps
+                        #print(f"final target poses: {this_target_poses}")
+                        #print(f"Filtered action timestamps: {action_timestamps}")
+                        #print(f"Length of action: {len(action)}")
+                        #print("Shape of final this_target_poses:", this_target_poses.shape)
+
                         # execute actions
                         env.exec_actions(
                             actions=this_target_poses,
@@ -342,7 +376,7 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                             print('Terminated by the timeout!')
 
                         term_pose = np.array([ 3.40948500e-01,  2.17721816e-01,  4.59076878e-02,  2.22014183e+00, -2.22184883e+00, -4.07186655e-04])
-                        curr_pose = obs['replica_eef_pose'][-1]
+                        curr_pose = obs['robot_eef_pose'][-1]
                         dist = np.linalg.norm((curr_pose - term_pose)[:2], axis=-1)
                         if dist < 0.03:
                             # in termination area
@@ -363,8 +397,11 @@ def main(input, output, robot_ip, match_dataset, match_episode,
                             break
 
                         # wait for execution
-                        precise_wait(t_cycle_end - frame_latency)
+                        # precise_wait(0.2)
                         iter_idx += steps_per_inference
+
+
+                        print(f'Number of loop executions: {iter_idx}')
 
                 except KeyboardInterrupt:
                     print("Interrupted!")

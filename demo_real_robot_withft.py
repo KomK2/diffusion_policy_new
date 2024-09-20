@@ -22,7 +22,8 @@ import click
 import cv2
 import numpy as np
 import scipy.spatial.transform as st
-from diffusion_policy.real_world.real_env import RealEnv
+from diffusion_policy.real_world.real_env_with_ft_high_freq import RealEnv
+
 from diffusion_policy.real_world.spacemouse_shared_memory import Spacemouse
 from diffusion_policy.common.precise_sleep import precise_wait
 from diffusion_policy.real_world.keystroke_counter import (
@@ -51,6 +52,10 @@ from aloha_scripts.constants import *
 @click.option(
     "--frequency", "-f", default=10, type=float, help="Control frequency in Hz."
 )
+
+@click.option(
+    "--ft_frequency", "-ftf", default=100, type=float, help="FT sensor frequency in Hz."
+)
 @click.option(
     "--command_latency",
     "-cl",
@@ -58,9 +63,12 @@ from aloha_scripts.constants import *
     type=float,
     help="Latency between receiving SpaceMouse command to executing on Robot in Sec.",
 )
-def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_latency):
+def main(output, robot_ip, vis_camera_idx, init_joints, frequency,ft_frequency, command_latency):
     # TODO: look into rtde_interpolation_controller.py and pose_trajectory_interpolator.py
     dt = 1 / frequency
+
+    ft_stack_count = int(ft_frequency / frequency)
+
     with SharedMemoryManager() as shm_manager:
         with KeystrokeCounter() as key_counter, Spacemouse(
             shm_manager=shm_manager
@@ -80,6 +88,10 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
             shm_manager=shm_manager,
             camera_serial_numbers=["cam_high_master", "cam_low","cam_wrist_master","cam_front_master"],
             video_capture_fps=30,
+            ft_master_service_name = None,
+            ft_follower_service_name = None,
+            ft_stack_count=ft_stack_count,
+            ft_frequency=ft_frequency
         ) as env:
             cv2.setNumThreads(1)
             # connect to replica
@@ -112,6 +124,7 @@ def main(output, robot_ip, vis_camera_idx, init_joints, frequency, command_laten
                         stop = True
                     elif key_stroke == KeyCode(char="c"):
                         # Start recording
+                        env.ft_sensor.calibrate_sensor()
                         env.start_episode(
                             t_start
                             + (iter_idx + 2) * dt

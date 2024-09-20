@@ -265,12 +265,14 @@ class RTDEInterpolationController(mp.Process):
                 pose_command = pose_interp(t_now)
                 vel = 0.5
                 acc = 0.5
-                assert rtde_c.servoL(pose_command, 
-                    vel, acc, # dummy, not used by ur5
-                    dt, 
-                    self.lookahead_time, 
-                    self.gain)
-                
+                # ###########################
+                # ##comment this section to test without robot movement ## kiran
+                # assert rtde_c.servoL(pose_command, 
+                #     vel, acc, # dummy, not used by ur5
+                #     dt, 
+                #     self.lookahead_time, 
+                #     self.gain)
+                # ###########################
                 # update robot state
                 state = dict()
                 for key in self.receive_keys:
@@ -334,7 +336,6 @@ class RTDEInterpolationController(mp.Process):
                     else:
                         keep_running = False
                         break
-
                 # regulate frequency
                 rtde_c.waitPeriod(t_start)
 

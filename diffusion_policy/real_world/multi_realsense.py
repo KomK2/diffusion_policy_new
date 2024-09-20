@@ -35,6 +35,8 @@ class MultiRealsense:
             serial_numbers = SingleRealsense.get_connected_devices_serial()
         n_cameras = len(serial_numbers)
 
+        print("multi realsense serials:", serial_numbers)
+
         advanced_mode_config = repeat_to_list(
             advanced_mode_config, n_cameras, dict)
         transform = repeat_to_list(
