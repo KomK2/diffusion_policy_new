@@ -104,7 +104,7 @@ training:
   # optimization
   lr_scheduler: cosine
   lr_warmup_steps: 500
-  num_epochs: 300
+  num_epochs: 600
   gradient_accumulate_every: 1
   # EMA destroys performance when used with BatchNorm
   # replace BatchNorm with GroupNorm.
@@ -113,7 +113,7 @@ training:
   # training loop control
   # in epochs
   rollout_every: 50
-  checkpoint_every: 50
+  checkpoint_every: 25
   val_every: 1
   sample_every: 5
   # steps per epoch
@@ -141,14 +141,14 @@ checkpoint:
   save_last_snapshot: False
 
 multi_run:
-  run_dir: data/outputs/${now:%Y.%m.%d}_${data_name}/${now:%H.%M.%S}_${name}_${task_type}
+  run_dir: /media/bmv/NVME4TB/checkpoints/${now:%Y.%m.%d}_${data_name}/${now:%H.%M.%S}_${name}_${task_type}
   wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${data_name}
 
 hydra:
   job:
     override_dirname: ${name}
   run:
-    dir: data/outputs/${now:%Y.%m.%d}_${data_name}/${now:%H.%M.%S}_${name}_${task_type}
+    dir: /media/bmv/NVME4TB/checkpoints/${now:%Y.%m.%d}_${data_name}/${now:%H.%M.%S}_${name}_${task_type}
   sweep:
-    dir: data/outputs/${now:%Y.%m.%d}_${data_name}/${now:%H.%M.%S}_${name}_${task_type}
+    dir: /media/bmv/NVME4TB/checkpoints/${now:%Y.%m.%d}_${data_name}/${now:%H.%M.%S}_${name}_${task_type}
     subdir: ${hydra.job.num}

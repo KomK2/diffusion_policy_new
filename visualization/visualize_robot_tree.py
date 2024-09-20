@@ -12,12 +12,12 @@ from viz_constants import VIZ_DIR
 dataset_dir = VIZ_DIR
 # Load the Zarr dataset
 z = zarr.open(f'/home/bmv/diffusion_policy_new/data/{dataset_dir}/replay_buffer.zarr', mode='r')
+# z = zarr.open(f'/home/bmv/Downloads/replicaless_rice_scoop/replay_buffer.zarr', mode='r')
 
-poses = z['data/action'][:]
-qpos = z['data/robot_joint'][:]
+poses = z['data/replica_eef_pose'][:]
+qpos = z['data/replica_joint'][:]
 ep_len = z['meta/episode_ends'][:]
 ts = z['data/timestamp'][:]
-
 dh_params = np.array(
 [
     [0.1625, 0.0, 0.5 * pi, 0.0],
@@ -48,8 +48,7 @@ plt.ion()
 print("Episode length is " , (end_index-start_index)," steps")
 try:
     for i in range(start_index, end_index):
-        # plt.clf()  # Clear the previous figure
-        ax_robot.clear();a = np.arange(10)
+        # plt.clf()  # Clear the previous figure         # print("difference in action_timetamps: ", np.diff(action_timestamps))
         if viz_type == 'action':
             print("qpos for the episode is ", qpos[i])
             xyz = qpos[i][:3].reshape((3,1))

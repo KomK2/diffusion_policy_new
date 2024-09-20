@@ -13,8 +13,7 @@ dataset_dir = VIZ_DIR
 # Load the Zarr dataset
 z = zarr.open(f'/home/bmv/diffusion_policy_new/data/{dataset_dir}/replay_buffer.zarr', mode='r')
 
-poses = z['data/robot_eef_pose'][:]
-# qpos = z['data/robot_joint'][:]
+poses = z['data/replica_eef_pose'][:]
 ep_len = z['meta/episode_ends'][:]
 ts = z['data/timestamp'][:]
 
@@ -38,7 +37,6 @@ else:
     y = poses[:, 1][start_index:end_index]
     z = poses[:, 2][start_index:end_index]
 
-    print("poses in the episode are: ", poses[start_index:end_index])
     # print(z)
 # Create 3D scatter plot
 fig = plt.figure()
@@ -51,9 +49,9 @@ ax.set_ylabel('Y Label')
 ax.set_zlabel('Z Label')
 ax.set_title('Robot Poses')
 
-ax.set_xlim([-1, 1])  # Set limits for the x-axis
-ax.set_ylim([-1, 1])  # Set limits for the y-axis
-# ax.set_zlim([-1, 1])  # Set limits for the z-axis
+ax.set_xlim([-0.5, 0.5])  # Set limits for the x-axis
+ax.set_ylim([-1, 0])  # Set limits for the y-axis
+ax.set_zlim([-0.0, 0.5])  # Set limits for the z-axis
 
 plt.show()
 

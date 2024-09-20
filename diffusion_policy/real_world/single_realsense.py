@@ -308,6 +308,18 @@ class SingleRealsense(mp.Process):
                 sensor.set_option(rs.option.enable_auto_exposure, False)
                 sensor.set_option(rs.option.exposure, 10000) ## experiment with exposure value 
 
+            if self.serial_number == 'cam_wrist_master':
+                # Initialize the RealSense pipeline
+                config = rs.config()
+                config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, self.capture_fps)
+                config.enable_device(WRIST_CAM_MASTER_ID)
+                pipeline = rs.pipeline()
+                pipeline.start(config)
+                sensor = pipeline.get_active_profile().get_device().query_sensors()[0]
+                sensor.set_option(rs.option.enable_auto_exposure, False)
+                sensor.set_option(rs.option.exposure, 10000) ## experiment with exposure value 
+            
+
             """
             Initialize Zed camera
             """    
@@ -316,6 +328,7 @@ class SingleRealsense(mp.Process):
                 # Create a ZED camera object
                 zed = sl.Camera()
                 # Set configuration parameters
+
                 init_params = sl.InitParameters()
                 init_params.camera_resolution = sl.RESOLUTION.HD1080  # Change the resolution as needed
                 init_params.camera_fps = self.capture_fps  # Use the specified FPS
@@ -330,6 +343,11 @@ class SingleRealsense(mp.Process):
                     return
                 # Create a runtime parameters object
                 runtime_params = sl.RuntimeParameters()
+                new_brightness_val = 3
+                zed.set_camera_settings(sl.VIDEO_SETTINGS.BRIGHTNESS, new_brightness_val)
+                brightnes_val = zed.get_camera_settings(sl.VIDEO_SETTINGS.BRIGHTNESS)
+                print(f"brightness value: {brightnes_val}")
+
 
 
             """
@@ -348,6 +366,15 @@ class SingleRealsense(mp.Process):
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                 cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
 
+            if self.serial_number == 'cam_high_master':
+                cam_path = os.path.realpath("/dev/CAM_HIGH_MASTER")
+                cam_idx = int(cam_path.split("/dev/video")[-1])
+                cap = cv2.VideoCapture(cam_idx)
+                cap.set(cv2.CAP_PROP_EXPOSURE, 0)
+                cap.set(cv2.CAP_PROP_FPS, self.capture_fps)
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
             if self.serial_number == 'cam_front':
                 # Initialize the RealSense pipeline
                 config = rs.config()
@@ -355,9 +382,21 @@ class SingleRealsense(mp.Process):
                 config.enable_device(FRONT_CAM_ID)
                 pipeline = rs.pipeline()
                 pipeline.start(config)
-                # sensor = pipeline.get_active_profile().get_device().query_sensors()[0]
-                # sensor.set_option(rs.option.enable_auto_exposure, False)
-                # sensor.set_option(rs.option.exposure, 10000)  
+                sensor = pipeline.get_active_profile().get_device().query_sensors()[0]
+                sensor.set_option(rs.option.enable_auto_exposure, False)
+                sensor.set_option(rs.option.exposure, 10000)  
+
+            if self.serial_number == 'cam_front_master':
+                # Initialize the RealSense pipeline
+                config = rs.config()
+                config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, self.capture_fps)
+                config.enable_device(FRONT_CAM_MASTER_ID)
+                pipeline = rs.pipeline()
+                pipeline.start(config)
+                sensor = pipeline.get_active_profile().get_device().query_sensors()[0]
+                sensor.set_option(rs.option.enable_auto_exposure, False)
+                sensor.set_option(rs.option.exposure, 10000)  
+
 
             # report global time
             # https://github.com/IntelRealSense/librealsense/pull/3909
@@ -412,6 +451,14 @@ class SingleRealsense(mp.Process):
                     if rs_color_frame:
                         frameset = np.asanyarray(rs_color_frame.get_data())
                         # frameset = cv2.cvtColor(rs_color_image, cv2.COLOR_BGR2RGB)
+
+                if self.serial_number == 'cam_wrist_master':
+                    # Realsense image acquisition
+                    rs_frames = pipeline.wait_for_frames()
+                    rs_color_frame = rs_frames.get_color_frame()
+                    if rs_color_frame:
+                        frameset = np.asanyarray(rs_color_frame.get_data())
+                        # frameset = cv2.cvtColor(rs_color_image, cv2.COLOR_BGR2RGB)
                         
                 if self.serial_number == 'cam_low':
                     # ZED image acquisition
@@ -439,7 +486,7 @@ class SingleRealsense(mp.Process):
                     Below is cropping logic when performing domain gap
                     comment/ uncomment these lines as needed
                     """
-                    # black_img[y1:y2, x1:x2] = frameset[y1:y2, x1:x2]
+                    # black_img[150:, 70:] = frameset[150:, 70:]
                     # frameset = black_img.copy()
 
                     """
@@ -447,14 +494,26 @@ class SingleRealsense(mp.Process):
                     """
                     # frameset = cv2.cvtColor(frameset, cv2.COLOR_BGR2RGB)
 
+                if self.serial_number == 'cam_high_master':
+                    _, frameset = cap.read()
+                    frameset = cv2.resize(frameset, (640,480))
+
                 if self.serial_number == 'cam_front':
                     # Realsense image acquisition
+                    
                     rs_frames = pipeline.wait_for_frames()
                     rs_color_frame = rs_frames.get_color_frame()
                     if rs_color_frame:
                         frameset = np.asanyarray(rs_color_frame.get_data())
-                        black_img[30:240, 200:550] = frameset[30:240, 200:550] 
-                        frameset = black_img.copy()
+
+                if self.serial_number == 'cam_front_master':
+                    # Realsense image acquisition
+                    
+                    rs_frames = pipeline.wait_for_frames()
+                    rs_color_frame = rs_frames.get_color_frame()
+                    if rs_color_frame:
+                        frameset = np.asanyarray(rs_color_frame.get_data())
+
 
                 # frameset = pipeline.wait_for_frames()
                 receive_time = time.time()
@@ -467,7 +526,6 @@ class SingleRealsense(mp.Process):
                 # realsense report in ms
                 # data['camera_capture_timestamp'] = frameset[f'{self.serial_number}_timestamps']
                 data['camera_capture_timestamp'] = time.time()
-                # print("camera is:", self.serial_number)
                 if self.enable_color:
                     color_frame = frameset
                     # cv2.imwrite(f'diffusion_policy/LHW_images/{self.serial_number}.png', color_frame)
@@ -607,6 +665,8 @@ class SingleRealsense(mp.Process):
                 zed.close()
             if self.serial_number == 'cam_high':
                 cap.release()
+            if self.serial_number == 'cam_front':
+                pipeline.stop()
             # rs_config.disable_all_streams()
             self.ready_event.set()
         

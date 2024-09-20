@@ -4,6 +4,7 @@ import numpy as np
 import time
 import shutil
 import math
+from scipy.interpolate import interp1d
 from multiprocessing.managers import SharedMemoryManager
 from diffusion_policy.real_world.rtde_interpolation_controller import (
     RTDEInterpolationController,
@@ -18,6 +19,8 @@ from diffusion_policy.common.timestamp_accumulator import (
 from diffusion_policy.real_world.multi_camera_visualizer import MultiCameraVisualizer
 from diffusion_policy.common.replay_buffer import ReplayBuffer
 from diffusion_policy.common.cv2_util import get_image_transform, optimal_row_cols
+# from diffusion_policy.real_world.force_torque_sensor import FTSensor
+
 DEFAULT_OBS_KEY_MAP = {
     # robot
     "ActualTCPPose": "robot_eef_pose",
@@ -27,6 +30,8 @@ DEFAULT_OBS_KEY_MAP = {
     # timestamps
     "step_idx": "step_idx",
     "timestamp": "timestamp",
+    # ft
+    # "ft_data": "ft_data"
 }
 
 
@@ -43,6 +48,8 @@ class RealEnv:
         obs_image_resolution=(640, 480),
         max_obs_buffer_size=30,
         camera_serial_numbers=None,
+        ft_master_service_name = None,
+        ft_follower_service_name = None,
         obs_key_map=DEFAULT_OBS_KEY_MAP,
         obs_float32=False,
         # action
@@ -62,7 +69,7 @@ class RealEnv:
         enable_multi_cam_vis=True,
         multi_cam_vis_resolution=(640, 480),
         # shared memory
-        shm_manager=None,
+        shm_manager=None
     ):
         assert frequency <= video_capture_fps
         output_dir = pathlib.Path(output_dir)
@@ -71,12 +78,13 @@ class RealEnv:
         video_dir.mkdir(parents=True, exist_ok=True)
         zarr_path = str(output_dir.joinpath("replay_buffer.zarr").absolute())
         replay_buffer = ReplayBuffer.create_from_path(zarr_path=zarr_path, mode="a")
-
+        # print("level 1")
         if shm_manager is None:
             shm_manager = SharedMemoryManager()
             shm_manager.start()
         if camera_serial_numbers is None:
-            camera_serial_numbers = SingleRealsense.get_connected_devices_serial()        
+            camera_serial_numbers = SingleRealsense.get_connected_devices_serial()
+
         color_tf = get_image_transform(
             input_res=video_capture_resolution,
             output_res=obs_image_resolution,
@@ -149,7 +157,9 @@ class RealEnv:
             )
         # print("level 4")
         cube_diag = np.linalg.norm([1, 1, 1])
-        j_init = np.array([-84.10, -73.89, -137.37, -56.35, 98.47, 7.36]) / 180 * np.pi
+        #j_init = np.array([-90, -69, -109, -71, 90, 0]) / 180 * np.pi
+        #j_init = np.array([-90, -55, -127, -30, 90, 0]) / 180 * np.pi
+        # j_init = np.array([-78, -67, -97, -103, 92, 3]) / 180 * np.pi # for new set of data
         if not init_joints:
             j_init = None
         robot = RTDEInterpolationController(
@@ -187,25 +197,34 @@ class RealEnv:
         self.replay_buffer = replay_buffer
         # temp memory buffers
         self.last_realsense_data = None
+        
         # recording buffers
         self.obs_accumulator = None
         self.action_accumulator = None
         self.stage_accumulator = None
         self.replica_joint_accumulator = None
         self.start_time = None
-        # print("level 7")
+        # print("Entering FT")
+        # ft_sensor = FTSensor(shm_manager=shm_manager,
+        #                      get_max_k=max_obs_buffer_size)
+        # self.ft_sensor = ft_sensor
+        # self.ft_accumulator = None
+        # print("exiting FT")
     # ======== start-stop API =============
     @property
     def is_ready(self):
-        return self.realsense.is_ready and self.robot.is_ready
+        return self.realsense.is_ready and self.robot.is_ready #and self.ft_sensor.is_ready
 
     def start(self, wait=True):
         self.realsense.start(wait=False)
         self.robot.start(wait=False)
+        # self.ft_sensor.start(wait=False)
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start(wait=False)
         if wait:
+            # print('*********')
             self.start_wait()
+        # print("Exiting start")
 
     def stop(self, wait=True):
         self.end_episode()
@@ -213,18 +232,21 @@ class RealEnv:
             self.multi_cam_vis.stop(wait=False)
         self.robot.stop(wait=False)
         self.realsense.stop(wait=False)
+        # self.ft_sensor.stop(wait=False)
         if wait:
             self.stop_wait()
 
     def start_wait(self):
         self.realsense.start_wait()
         self.robot.start_wait()
+        # self.ft_sensor.start_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.start_wait()
 
     def stop_wait(self):
         self.robot.stop_wait()
         self.realsense.stop_wait()
+        # self.ft_sensor.stop_wait()
         if self.multi_cam_vis is not None:
             self.multi_cam_vis.stop_wait()
 
@@ -240,16 +262,18 @@ class RealEnv:
     def get_obs(self) -> dict:
         "observation dict"
         assert self.is_ready
-
+        
         # get data
-
+        # 30 Hz, camera_receive_timestamp
         k = math.ceil(self.n_obs_steps * (self.video_capture_fps / self.frequency))
-
+        # print("before realsense data:",self.last_realsense_data)
         self.last_realsense_data = self.realsense.get(k=k, out=self.last_realsense_data)
-
+        # 125 hz, robot_receive_timestamp
         last_robot_data = self.robot.get_all_state()
-
-
+        
+        # last_ft_data = self.ft_sensor.get_all_state()
+        # both have more than n_obs_steps data
+        # print(last_ft_data["ft_data"])
         # align camera obs timestamps
         dt = 1 / self.frequency
         last_timestamp = np.max(
@@ -289,60 +313,102 @@ class RealEnv:
         robot_obs = dict()
         for k, v in robot_obs_raw.items():
             robot_obs[k] = v[this_idxs]
+
         # accumulate robot obs
         if self.obs_accumulator is not None:
             self.obs_accumulator.put(robot_obs_raw, robot_timestamps)
 
+        #### for FT
+        # print('Getting ft obs************************')
+        # align ft obs
+        # ft_timestamps = last_ft_data["ft_receive_timestamp"]  # Assuming this is the timestamp for FT data
+        # this_timestamps = ft_timestamps
+        # this_idxs = list()
+        # for t in obs_align_timestamps:
+        #     is_before_idxs = np.nonzero(this_timestamps < t)[0]
+        #     this_idx = 0
+        #     if len(is_before_idxs) > 0:
+        #         this_idx = is_before_idxs[-1]
+        #     this_idxs.append(this_idx)
+
+        # ft_obs_raw = dict()
+        # for k, v in last_ft_data.items():
+        #     if k in self.obs_key_map:  # Assuming self.obs_key_map is appropriately defined for FT data
+        #         ft_obs_raw[self.obs_key_map[k]] = v
+
+        # ft_obs = dict()
+        # for k, v in ft_obs_raw.items():
+        #     ft_obs[k] = v[this_idxs]
+
+        # # accumulate robot obs
+        # if self.ft_accumulator is not None:
+        #     self.ft_accumulator.put(ft_obs_raw, ft_timestamps)
+
         # return obs
         obs_data = dict(camera_obs)
         obs_data.update(robot_obs)
+        # obs_data.update(ft_obs)
         obs_data["timestamp"] = obs_align_timestamps
         return obs_data
 
     def exec_actions(
-        self,
-        actions: np.ndarray,
-        timestamps: np.ndarray,
-        replica_joint: Optional[np.ndarray] = None,  # added to capture replica joints 
-        stages: Optional[np.ndarray] = None,
-    ):
-        assert self.is_ready
-        if not isinstance(actions, np.ndarray):
-            actions = np.array(actions)
-        if not isinstance(timestamps, np.ndarray):
-            timestamps = np.array(timestamps)
+            self,
+            actions: np.ndarray,
+            timestamps: np.ndarray,
+            replica_joint: Optional[np.ndarray] = None, 
+            stages: Optional[np.ndarray] = None,
+        ):
+            assert self.is_ready
+            if not isinstance(actions, np.ndarray):
+                actions = np.array(actions)
+            if not isinstance(timestamps, np.ndarray):
+                timestamps = np.array(timestamps)
 
-        # added to capture replica joints 
-        if not isinstance(replica_joint, np.ndarray):
-            replica_joint = np.array(replica_joint)
+            
+            if replica_joint is None:
+                replica_joint = np.zeros_like(timestamps, dtype=np.int64)
+            elif not isinstance(replica_joint, np.ndarray):
+                replica_joint = np.array(replica_joint)
 
-        if stages is None:
-            stages = np.zeros_like(timestamps, dtype=np.int64)
-        elif not isinstance(stages, np.ndarray):
-            stages = np.array(stages, dtype=np.int64)
+            if stages is None:
+                stages = np.zeros_like(timestamps, dtype=np.int64)
+            elif not isinstance(stages, np.ndarray):
+                stages = np.array(stages, dtype=np.int64)
+            n_p = 8
+            # convert action to pose
+            receive_time = time.time()
+            is_new = timestamps > receive_time
+            new_actions = actions[is_new]
+            new_replica_joint = replica_joint[is_new] 
+            new_timestamps = timestamps[is_new]
+            new_stages = stages[is_new]
 
-        # convert action to pose
-        receive_time = time.time()
-        is_new = timestamps > receive_time
-        new_actions = actions[is_new]
-        new_replica_joint = replica_joint[is_new]  # added to capture replica joints
-        new_timestamps = timestamps[is_new]
-        new_stages = stages[is_new]
-        # schedule waypoints
-        for i in range(len(new_actions)):
-            self.robot.schedule_waypoint(
-                pose=new_actions[i], target_time=new_timestamps[i]
-            )
+            # interpolate between each pair of new actions and timestamps to generate 5 points
+            for i in range(len(new_actions) - 1):
+                start_pose = new_actions[i]
+                end_pose = new_actions[i + 1]
+                start_time = new_timestamps[i]
+                end_time = new_timestamps[i + 1]
 
-        # record actions
-        if self.action_accumulator is not None:
-            self.action_accumulator.put(new_actions, new_timestamps) 
-        if self.stage_accumulator is not None:
-            self.stage_accumulator.put(new_stages, new_timestamps)
+                # Generate 7 points (including the start and end points)
+                interpolated_timestamps = np.linspace(start_time, end_time, n_p)
+                
+                # Interpolate for each dimension of the pose
+                interpolated_actions = np.zeros((n_p, new_actions.shape[1]))
+                for dim in range(new_actions.shape[1]):
+                    interp_func = interp1d([start_time, end_time], [start_pose[dim], end_pose[dim]])
+                    interpolated_actions[:, dim] = interp_func(interpolated_timestamps)
 
+                # print("interpolated_actions from  the loop are :", interpolated_actions)
+                # print("interpolated_timestamps from the loop are :", interpolated_timestamps)
 
-        if self.replica_joint_accumulator is not None:
-            self.replica_joint_accumulator.put(new_replica_joint, new_timestamps)
+                
+                #Schedule interpolated waypoints (excluding the first to avoid duplication)
+                for j in range(1, n_p):
+                    self.robot.schedule_waypoint(
+                        pose=interpolated_actions[j], target_time=interpolated_timestamps[j]
+                    )
+
     def get_robot_state(self):
         return self.robot.get_state()
 
@@ -379,7 +445,11 @@ class RealEnv:
             start_time=start_time, dt=1 / self.frequency
         )
 
-        # # added to capture replica joints 4/2/24 sriram
+        # self.ft_accumulator = TimestampObsAccumulator(
+        #     start_time=start_time, dt=1 / self.frequency
+        # )
+
+        # # added to capture replica joints 4/2/24 Abhi
         self.replica_joint_accumulator = TimestampActionAccumulator(
             start_time=start_time, dt=1 / self.frequency
         )
@@ -398,9 +468,12 @@ class RealEnv:
             assert self.action_accumulator is not None
             assert self.stage_accumulator is not None
 
-            # # added to capture replica joints 4/2/24 sriram
+            # added to capture replica joints 4/2/24 Abhi
             assert self.replica_joint_accumulator is not None
 
+            # Since the only way to accumulate obs and action is by calling
+            # get_obs and exec_actions, which will be in the same thread.
+            # We don't need to worry new data come in here.
             obs_data = self.obs_accumulator.data
             obs_timestamps = self.obs_accumulator.timestamps
 
@@ -408,29 +481,27 @@ class RealEnv:
             action_timestamps = self.action_accumulator.timestamps
             stages = self.stage_accumulator.actions
 
-            # # added to capture replica joints 4/2/24 sriram
+            # ft_data = self.ft_accumulator.data
+            # ft_timestamps = self.ft_accumulator.timestamps
+            # added to capture replica joints 4/2/24 Abhi
             replica_joint = self.replica_joint_accumulator.actions
 
-            n_steps = min(len(obs_timestamps), len(action_timestamps))
+            n_steps = min(len(obs_timestamps), len(action_timestamps))#, len(ft_timestamps))
             if n_steps > 0:
                 episode = dict()
                 episode["timestamp"] = obs_timestamps[:n_steps]
                 episode["action"] = actions[:n_steps]
                 episode["stage"] = stages[:n_steps]
-                episode["replica_eef_pose"] = actions[:n_steps]
-
-                # # # # added to capture replica joints 4/2/24 sriram
+                # added to capture replica joints 4/2/24 Abhi
                 episode["replica_joint"] = replica_joint[:n_steps]
+                episode["replica_eef_pose"] = actions[:n_steps]
+                # save robot observations
                 for key, value in obs_data.items():
-                    # print(key)
                     episode[key] = value[:n_steps]
-                ## this when teleoperating the robot without any lag at 100hz during data collection
-                # factor = 10
-                # for key, value in episode.items():
-                #     episode[key] = value[::factor]
-                    # if len(episode[key]) > 0:
-                    #     episode[key] = episode[key][1:]
-                    
+                
+                # # save ft observations
+                # for key, value in ft_data.items():
+                #     episode[key] = value[:n_steps]
 
                 self.replay_buffer.add_episode(episode, compressors="disk")
                 episode_id = self.replay_buffer.n_episodes - 1
@@ -439,6 +510,7 @@ class RealEnv:
             self.obs_accumulator = None
             self.action_accumulator = None
             self.stage_accumulator = None
+            # self.ft_accumulator = None
             self.replica_joint_accumulator = None
 
     def drop_episode(self):
