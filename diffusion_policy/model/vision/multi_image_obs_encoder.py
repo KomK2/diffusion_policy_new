@@ -6,6 +6,7 @@ import torchvision
 from diffusion_policy.model.vision.crop_randomizer import CropRandomizer
 from diffusion_policy.model.common.module_attr_mixin import ModuleAttrMixin
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
+from diffusion_policy.model.vision.ft_transformer import ForceTorqueEncoder
 
 
 class MultiImageObsEncoder(ModuleAttrMixin):
@@ -124,6 +125,8 @@ class MultiImageObsEncoder(ModuleAttrMixin):
         self.low_dim_keys = low_dim_keys
         self.key_shape_map = key_shape_map
 
+        self.force_torque_encoder = ForceTorqueEncoder(ft_seq_len=10) 
+
     def forward(self, obs_dict):
         batch_size = None
         features = list()
@@ -167,11 +170,20 @@ class MultiImageObsEncoder(ModuleAttrMixin):
         # process lowdim input
         for key in self.low_dim_keys:
             data = obs_dict[key]
+
+            # print("the shape of the data is: ", data.shape)
+
+            if key == 'ft_data':
+                data = self.force_torque_encoder(data, obs_dict['replica_eef_pose'])
+                
+
             if batch_size is None:
                 batch_size = data.shape[0]
             else:
                 assert batch_size == data.shape[0]
-            assert data.shape[1:] == self.key_shape_map[key]
+
+            # if key != 'ft_data':
+            #     assert data.shape[1:] == self.key_shape_map[key]
             features.append(data)
         
         # concatenate all features
