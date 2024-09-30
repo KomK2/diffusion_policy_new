@@ -11,6 +11,7 @@ from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1
 from diffusion_policy.model.diffusion.mask_generator import LowdimMaskGenerator
 from diffusion_policy.model.vision.multi_image_obs_encoder import MultiImageObsEncoder
 from diffusion_policy.common.pytorch_util import dict_apply
+import torchvision
 
 class DiffusionUnetImagePolicy(BaseImagePolicy):
     def __init__(self, 
@@ -78,6 +79,8 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
+        
+        self.count = 0
     
     # ========= inference  ============
     def conditional_sample(self, 
@@ -190,12 +193,71 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
         self.normalizer.load_state_dict(normalizer.state_dict())
 
     def compute_loss(self, batch):
-        # normalize input
+        self.count += 1
+        # images = batch['obs']['camera_0']  # Replace 'camera_0' with your image key
+        # print("Before normalization:", images.min(), images.max())
+
+        # if self.count == 3:
+        #     output_dir = '/home/bmv/diffusion_policy_new/data/replicaless_rice_scoop/videos/1'
+        #     images1 = batch['obs']['camera_0']
+        #     images2 = batch['obs']['camera_1']
+        #     images3 = batch['obs']['camera_2']
+        #     images4 = batch['obs']['camera_3']
+        #     for i in range(images1.shape[0]):
+        #         img1 = images1[i]
+        #         img2 = images2[i]
+        #         img3 = images3[i]
+        #         img4 = images4[i]
+
+        #         torchvision.utils.save_image(img1, f'{output_dir}/camera_0_{i}.png')
+        #         torchvision.utils.save_image(img2, f'{output_dir}/camera_1_{i}.png')
+        #         torchvision.utils.save_image(img3, f'{output_dir}/camera_2_{i}.png')
+        #         torchvision.utils.save_image(img4, f'{output_dir}/camera_4_{i}.png')
+
+        # images1 = batch['obs']['camera_0']
+        # images2 = batch['obs']['camera_1']
+        # # images3 = batch['obs']['camera_2']
+        # images4 = batch['obs']['camera_3']
+
+            
         assert 'valid_mask' not in batch
         nobs = self.normalizer.normalize(batch['obs'])
+      
+      
+        # nimages = nobs['camera_0']
+
+        # print("After normalization:", nimages.min(), nimages.max())
+
+        # if self.count == 3:
+        #     output_dir = '/home/bmv/diffusion_policy_new/data/replicaless_rice_scoop/videos/1'
+        #     images1 = nobs['camera_0']
+        #     images2 = nobs['camera_1']
+        #     images3 = nobs['camera_2']
+        #     images4 = nobs['camera_3']
+        #     for i in range(images1.shape[0]):
+        #         img1 = images1[i]
+        #         img2 = images2[i]
+        #         img3 = images3[i]
+        #         img4 = images4[i]
+
+        #         torchvision.utils.save_image(img1, f'{output_dir}/camera_0_{i}_normalized.png')
+        #         torchvision.utils.save_image(img2, f'{output_dir}/camera_1_{i}_normalized.png')
+        #         torchvision.utils.save_image(img3, f'{output_dir}/camera_2_{i}_normalized.png')
+        #         torchvision.utils.save_image(img4, f'{output_dir}/camera_4_{i}_normalized.png')
+
+
+        # nobs['camera_0'] = images1
+        # nobs['camera_1'] = images2
+        # # nobs['camera_2'] = images3
+        # nobs['camera_3'] = images4
+
+
+        
         nactions = self.normalizer['action'].normalize(batch['action'])
         batch_size = nactions.shape[0]
         horizon = nactions.shape[1]
+
+        # print("the number of steps in the future", horizon)
 
         # handle different ways of passing observation
         local_cond = None
@@ -204,6 +266,7 @@ class DiffusionUnetImagePolicy(BaseImagePolicy):
         cond_data = trajectory
         if self.obs_as_global_cond:
             # reshape B, T, ... to B*T
+            # print("the shape of the obs",this_nobs["ft_data"].shape  )
             this_nobs = dict_apply(nobs, 
                 lambda x: x[:,:self.n_obs_steps,...].reshape(-1,*x.shape[2:]))
             nobs_features = self.obs_encoder(this_nobs)
