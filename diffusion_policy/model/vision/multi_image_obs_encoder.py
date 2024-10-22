@@ -171,7 +171,6 @@ class MultiImageObsEncoder(ModuleAttrMixin):
                 img = self.key_transform_map[key](img)
                 feature = self.key_model_map[key](img)
                 feature = nn.Linear(512,256).to(self.device) (feature)
-
                 if key =="camera_0":
                     cf0 = feature.to(self.device)
                 if key =="camera_1":
@@ -197,14 +196,14 @@ class MultiImageObsEncoder(ModuleAttrMixin):
  
             features.append(action_logits)
 
-        # if obs_dict.get('replica_eef_pose') is not None:
-        #     data = obs_dict["replica_eef_pose"]
-        #     if batch_size is None:
-        #         batch_size = data.shape[0]
-        #     else:
-        #         assert batch_size == data.shape[0]
-        #     assert data.shape[1:] == self.key_shape_map["replica_eef_pose"]
-        #     features.append(data)
+        if obs_dict.get('replica_eef_pose') is not None:
+            data = obs_dict["replica_eef_pose"]
+            if batch_size is None:
+                batch_size = data.shape[0]
+            else:
+                assert batch_size == data.shape[0]
+            assert data.shape[1:] == self.key_shape_map["replica_eef_pose"]
+            features.append(data)
         
         # concatenate all features
         result = torch.cat(features, dim=-1)

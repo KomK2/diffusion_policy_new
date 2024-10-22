@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from diffusion_policy.model.force_torque.ft_transformer import PositionalEncoding
+from diffusion_policy.model.force_torque.positional_encoding import PositionalEncoding
+
 
 class EndEffectorEncoder(nn.Module):
-
     def __init__(self, d_model=256, nhead=8, num_encoder_layers=3):
         super(EndEffectorEncoder, self).__init__()
 

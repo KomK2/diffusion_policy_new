@@ -99,6 +99,8 @@ class RealPushTImageDataset(BaseImageDataset):
                 actions_diff[start+1:end] = np.diff(actions[start:end], axis=0)
             replay_buffer['action'][:] = actions_diff
 
+        # replay_buffer["ft_data"][:] = -1 * replay_buffer["ft_data"][:]
+      
         rgb_keys = list()
         lowdim_keys = list()
         obs_shape_meta = shape_meta['obs']
@@ -144,7 +146,7 @@ class RealPushTImageDataset(BaseImageDataset):
         self.n_latency_steps = n_latency_steps
         self.pad_before = pad_before
         self.pad_after = pad_after
-
+        
     def get_validation_dataset(self):
         val_set = copy.copy(self)
         val_set.sampler = SequenceSampler(

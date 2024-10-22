@@ -1,14 +1,17 @@
 name: real_image
-data_name: ft_vision
+data_name: wipe_board
 
-task_type: ft_vision 
+task_type: wipe_board 
 image_shape: [3,480,640]
-dataset_path: /home/bmv/diffusion_policy_new/data/ft_vision
+dataset_path: /home/bmv/diffusion_policy_new/data/wipe_board
 
 shape_meta: &shape_meta
   # acceptable types: rgb, low_dim
   obs:  
     camera_0:
+      shape: ${task.image_shape}
+      type: rgb
+    camera_1:
       shape: ${task.image_shape}
       type: rgb
     replica_eef_pose:

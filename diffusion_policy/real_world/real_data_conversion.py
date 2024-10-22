@@ -3,6 +3,7 @@ import os
 import pathlib
 import numpy as np
 import av
+import cv2
 import zarr
 import numcodecs
 import multiprocessing
@@ -29,7 +30,8 @@ def real_data_to_replay_buffer(
         n_decoding_threads: int=multiprocessing.cpu_count(),
         n_encoding_threads: int=multiprocessing.cpu_count(),
         max_inflight_tasks: int=multiprocessing.cpu_count()*5,
-        verify_read: bool=True
+        verify_read: bool=True,
+        save_images_dir : str = "./cropped_images/"
         ) -> ReplayBuffer:
     """
     It is recommended to use before calling this function
@@ -78,6 +80,9 @@ def real_data_to_replay_buffer(
         chunks=chunks_map,
         compressors=compressor_map
         )
+    
+    os.makedirs(save_images_dir, exist_ok=True)
+
     
     # worker function
     def put_img(zarr_arr, zarr_idx, img):
@@ -182,6 +187,9 @@ def real_data_to_replay_buffer(
                         
                         global_idx = episode_start + step_idx
                         futures.add(executor.submit(put_img, arr, global_idx, frame))
+
+                        cropped_image_filename = os.path.join(save_images_dir, f"episode_{episode_idx}_frame_{step_idx}_camera_{camera_idx}.jpg")
+                        cv2.imwrite(cropped_image_filename, frame)
 
                         if step_idx == (episode_length - 1):
                             break
