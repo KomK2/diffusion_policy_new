@@ -1,9 +1,9 @@
 name: real_image
-data_name: wipe_board
+data_name: ft_vision
 
-task_type: wipe_board 
+task_type: ft_vision 
 image_shape: [3,480,640]
-dataset_path: /home/bmv/diffusion_policy_new/data/wipe_board
+dataset_path: /home/bmv/diffusion_policy_new/data/ft_vision
 
 shape_meta: &shape_meta
   # acceptable types: rgb, low_dim
@@ -11,17 +11,14 @@ shape_meta: &shape_meta
     camera_0:
       shape: ${task.image_shape}
       type: rgb
-    camera_1:
-      shape: ${task.image_shape}
-      type: rgb
-    camera_2:
-      shape: ${task.image_shape}
-      type: rgb
+    # camera_1:
+    #   shape: ${task.image_shape}
+    #   type: rgb
+    # camera_2:
+    #   shape: ${task.image_shape}
+    #   type: rgb
     replica_eef_pose:
       shape: [6,]
-      type: low_dim
-    ft_data:
-      shape: [100,6,]
       type: low_dim
   action: 
     shape: [6,]
@@ -40,7 +37,7 @@ dataset:
   n_latency_steps: ${n_latency_steps}
   use_cache: True
   seed: 42
-  val_ratio: 0.1
+  val_ratio: 0
   max_train_episodes: null
   delta_action: False
 

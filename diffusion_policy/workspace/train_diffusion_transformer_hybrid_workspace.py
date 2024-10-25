@@ -51,8 +51,8 @@ class TrainDiffusionTransformerHybridWorkspace(BaseWorkspace):
             self.ema_model = copy.deepcopy(self.model)
 
         # configure training state
-        self.optimizer = self.model.get_optimizer(**cfg.optimizer)
-
+        self.optimizer = hydra.utils.instantiate(
+            cfg.optimizer, params=self.model.parameters())
         # configure training state
         self.global_step = 0
         self.epoch = 0
